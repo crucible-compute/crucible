@@ -1,0 +1,23 @@
+apiVersion: crucible.dev/v1alpha1
+kind: CruciblePlatform
+metadata:
+  name: test-platform
+  namespace: default
+spec:
+  celeborn:
+    workers: 2
+    workerStorage: emptyDir
+    image: apache/celeborn:0.5.2
+  volcano:
+    tenants:
+      - name: default
+        queueWeight: 1
+      - name: team-a
+        queueWeight: 2
+  historyServer:
+    enabled: true
+    image: crucible-spark:latest
+  objectStore:
+    bucket: crucible-data
+    endpoint: http://minio:9000
+    region: us-east-1

@@ -1,0 +1,50 @@
+# Helm values for local Kind testing
+
+image:
+  operator:
+    repository: crucible-operator
+    tag: latest
+    pullPolicy: Never  # Images loaded via kind load
+  api:
+    repository: crucible-api
+    tag: latest
+    pullPolicy: Never
+
+operator:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+api:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+
+objectStore:
+  bucket: crucible-data
+  endpoint: http://minio:9000
+  region: us-east-1
+
+celeborn:
+  workers: 2
+  workerStorage: emptyDir
+  image: apache/celeborn:0.5.2
+
+historyServer:
+  enabled: true
+  image: crucible-spark:latest
+
+versions:
+  celeborn: "0.5.2"
+  volcano: "1.10.0"
+  flinkOperator: "1.10.0"
