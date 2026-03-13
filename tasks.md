@@ -51,7 +51,7 @@ These are append-only working documents, not polished docs. They accumulate inst
 - `crucible-types`: CRD structs, job state machine, tenant-to-queue mapping, error types (`thiserror`). No async runtime.
 - `crucible-store`: object store client (async, `aws-sdk-s3`). Depends on `crucible-types` for path layout.
 - Workspace `Cargo.toml` with `[workspace.dependencies]` for version inheritance (see Decisions)
-- Rust 2024 edition, `rust-version = "1.85"`
+- Rust 2024 edition, `rust-version = "1.88"` (kube 3.0 minimum)
 - Dockerfiles for operator and API server (multi-stage builds, scratch/distroless base)
 - `.github/workflows/ci.yaml`: `cargo fmt --check`, `cargo clippy`, `cargo test --lib` on every PR
 - `justfile` with targets for non-cargo tasks (see 0.4, 0.5)
@@ -72,8 +72,8 @@ These are append-only working documents, not polished docs. They accumulate inst
 - Unit tests: path construction for all job types and log sources
 
 ### 0.4 Base container images
-- Dockerfile for Crucible Spark 4.x base image (Java 21, Scala 2.13, stripped unnecessary Hadoop/Hive JARs)
-- Dockerfile for Crucible Flink 2.x base image (Java 21, Scala 2.13)
+- Dockerfile for Crucible Spark 4.x base image (Java 21, no Scala suffix — Spark 4.x dropped it)
+- Dockerfile for Crucible Flink 2.x base image (Java 21, scala_2.12 in tarball name only — Flink 2.0 deprecated Scala API)
 - `just images` to build locally, `just push-images` to push to GHCR
 - For Kind: `just load-images` wraps `kind load docker-image`
 - Images tagged with Crucible version and `latest`
