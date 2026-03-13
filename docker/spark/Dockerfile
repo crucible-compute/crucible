@@ -1,7 +1,6 @@
 FROM eclipse-temurin:21-jre-jammy AS base
 
 ARG SPARK_VERSION=4.0.0
-ARG SCALA_VERSION=2.13
 ARG HADOOP_VERSION=3
 
 ENV SPARK_HOME=/opt/spark
@@ -13,9 +12,10 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Download and extract Spark
-RUN curl -fsSL "https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop${HADOOP_VERSION}-scala${SCALA_VERSION}.tgz" \
+# Spark 4.x no longer ships scala-suffixed binaries
+RUN curl -fsSL "https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop${HADOOP_VERSION}.tgz" \
     | tar -xz -C /opt && \
-    mv "/opt/spark-${SPARK_VERSION}-bin-hadoop${HADOOP_VERSION}-scala${SCALA_VERSION}" "${SPARK_HOME}"
+    mv "/opt/spark-${SPARK_VERSION}-bin-hadoop${HADOOP_VERSION}" "${SPARK_HOME}"
 
 # Remove unnecessary JARs to reduce image size
 RUN rm -rf ${SPARK_HOME}/examples \

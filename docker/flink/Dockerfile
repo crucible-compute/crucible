@@ -1,7 +1,8 @@
 FROM eclipse-temurin:21-jre-jammy AS base
 
 ARG FLINK_VERSION=2.0.0
-ARG SCALA_VERSION=2.13
+# Flink 2.0 removed the Scala API but the binary tarball still carries scala_2.12 in its name
+ARG SCALA_VERSION=2.12
 
 ENV FLINK_HOME=/opt/flink
 ENV PATH="${FLINK_HOME}/bin:${PATH}"
