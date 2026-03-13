@@ -1,0 +1,58 @@
+[workspace]
+members = [
+    "crates/crucible-types",
+    "crates/crucible-store",
+    "crates/crucible-operator",
+    "crates/crucible-api",
+    "crates/crucible-cli",
+]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.88"
+license = "Apache-2.0"
+repository = "https://github.com/crucible-compute/crucible"
+
+[workspace.dependencies]
+# Internal crates
+crucible-types = { path = "crates/crucible-types" }
+crucible-store = { path = "crates/crucible-store" }
+
+# Kubernetes
+kube = { version = "3.0", features = ["runtime", "derive", "client"] }
+k8s-openapi = { version = "0.27", features = ["latest"] }
+schemars = "1"
+
+# Async
+tokio = { version = "1", features = ["full"] }
+
+# Web
+axum = "0.8"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "cors"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Cloud
+aws-sdk-s3 = "1.126"
+aws-config = { version = "1", features = ["behavior-version-latest"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# HTTP client (for CLI)
+reqwest = { version = "0.12", features = ["json"] }
+
+# Testing
+tokio-test = "0.4"

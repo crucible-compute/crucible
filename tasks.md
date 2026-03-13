@@ -26,11 +26,11 @@ These are append-only working documents, not polished docs. They accumulate inst
 
 **Web framework:** Axum. Shares the tokio runtime and Tower middleware ecosystem with kube-rs. No runtime bridging needed.
 
-**Rust edition and MSRV:** Rust 2024 edition. MSRV = 1.85 (latest stable). Set `rust-version = "1.85"` in workspace `Cargo.toml`.
+**Rust edition and MSRV:** Rust 2024 edition. MSRV = 1.88 (kube 3.0 minimum). Set `rust-version = "1.88"` in workspace `Cargo.toml`.
 
 **Error handling:** `thiserror` at crate boundaries (public API types that other crates consume — maps to HTTP status codes in the API server). `anyhow` for internal plumbing (reconciler internals where errors are logged and retried).
 
-**Dependency versions (workspace `Cargo.toml`):** Use `[workspace.dependencies]` for version inheritance. Pin major/minor, `Cargo.lock` handles patch. Key pins: `kube` 0.98, `k8s-openapi` 0.23 (with `latest` feature), `tokio` 1, `axum` 0.8, `serde`/`serde_json` 1, `aws-sdk-s3` latest. Managed dependency versions: Celeborn 0.5.x, Volcano 1.10.x, Flink Kubernetes Operator 1.10.x — pinned in `values.yaml` under `versions.*`.
+**Dependency versions (workspace `Cargo.toml`):** Use `[workspace.dependencies]` for version inheritance. Pin major/minor, `Cargo.lock` handles patch. Key pins: `kube` 3.0, `k8s-openapi` 0.27 (with `latest` feature), `schemars` 1, `tokio` 1, `axum` 0.8, `serde`/`serde_json` 1, `aws-sdk-s3` latest. Managed dependency versions: Celeborn 0.5.x, Volcano 1.10.x, Flink Kubernetes Operator 1.10.x — pinned in `values.yaml` under `versions.*`.
 
 **CRD API version:** `v1alpha1` for all CRDs (`CruciblePlatform`, `CrucibleSparkJob`, `CrucibleFlinkJob`). Standard K8s convention for pre-stable schemas. Migration to `v1` is a v1.0 concern.
 

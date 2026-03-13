@@ -1,0 +1,20 @@
+[package]
+name = "crucible-store"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Object store client abstraction for Crucible"
+
+[dependencies]
+crucible-types.workspace = true
+aws-sdk-s3.workspace = true
+aws-config.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+bytes = "1"
+
+[dev-dependencies]
+tokio-test.workspace = true
