@@ -13,6 +13,7 @@ use crate::state::JobPhase;
     status = "CrucibleSparkJobStatus",
     shortname = "csj"
 )]
+#[serde(rename_all = "camelCase")]
 pub struct CrucibleSparkJobSpec {
     pub jar: String,
     pub class: String,
@@ -35,6 +36,7 @@ pub struct ResourceSpec {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct CrucibleSparkJobStatus {
     pub phase: Option<JobPhase>,
     pub driver_pod: Option<String>,
@@ -101,6 +103,7 @@ mod tests {
     #[test]
     fn minimal_spec_deserializes() {
         let json = r#"{"jar":"app.jar","class":"Main","tenant":"default"}"#;
+        // Note: camelCase fields like sparkConfig/driverResources default to empty/None
         let spec: CrucibleSparkJobSpec = serde_json::from_str(json).unwrap();
         assert_eq!(spec.jar, "app.jar");
         assert!(spec.args.is_empty());

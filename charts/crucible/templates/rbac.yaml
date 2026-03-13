@@ -17,7 +17,7 @@ rules:
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   # Sub-component lifecycle (pods, services, deployments, statefulsets)
   - apiGroups: [""]
-    resources: ["pods", "pods/log", "services", "configmaps", "secrets"]
+    resources: ["pods", "pods/log", "services", "configmaps", "secrets", "serviceaccounts"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets"]

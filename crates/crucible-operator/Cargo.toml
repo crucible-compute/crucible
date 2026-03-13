@@ -20,3 +20,12 @@ tracing-subscriber.workspace = true
 axum.workspace = true
 chrono = { version = "0.4", features = ["serde"] }
 futures = "0.3"
+rustls = "0.23"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }
+kube = { workspace = true, features = ["runtime", "derive", "client"] }
+k8s-openapi = { workspace = true }
+serde_json.workspace = true
+tracing-subscriber.workspace = true
+rustls = "0.23"

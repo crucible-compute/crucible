@@ -13,6 +13,7 @@ use crate::state::JobPhase;
     status = "CrucibleFlinkJobStatus",
     shortname = "cfj"
 )]
+#[serde(rename_all = "camelCase")]
 pub struct CrucibleFlinkJobSpec {
     pub jar: String,
     pub entry_class: String,
@@ -26,6 +27,7 @@ pub struct CrucibleFlinkJobSpec {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct CrucibleFlinkJobStatus {
     pub phase: Option<JobPhase>,
     pub job_manager_pod: Option<String>,
@@ -80,7 +82,7 @@ mod tests {
 
     #[test]
     fn minimal_spec_deserializes() {
-        let json = r#"{"jar":"app.jar","entry_class":"Main","tenant":"default"}"#;
+        let json = r#"{"jar":"app.jar","entryClass":"Main","tenant":"default"}"#;
         let spec: CrucibleFlinkJobSpec = serde_json::from_str(json).unwrap();
         assert_eq!(spec.entry_class, "Main");
         assert!(spec.parallelism.is_none());

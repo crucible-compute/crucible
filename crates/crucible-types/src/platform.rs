@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
     status = "CruciblePlatformStatus",
     shortname = "cp"
 )]
+#[serde(rename_all = "camelCase")]
 pub struct CruciblePlatformSpec {
     pub celeborn: CelebornConfig,
     pub volcano: VolcanoConfig,
@@ -19,6 +20,7 @@ pub struct CruciblePlatformSpec {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct CelebornConfig {
     pub workers: u32,
     pub worker_storage: StorageType,
@@ -41,6 +43,7 @@ pub struct VolcanoConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct TenantConfig {
     pub name: String,
     pub queue_weight: Option<u32>,
@@ -60,6 +63,7 @@ pub struct ObjectStoreConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct CruciblePlatformStatus {
     pub phase: Option<PlatformPhase>,
     #[serde(default)]
@@ -126,6 +130,7 @@ impl std::fmt::Display for ConditionStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct PlatformCondition {
     pub r#type: ConditionType,
     pub status: ConditionStatus,

@@ -22,6 +22,11 @@ use crate::reconcilers::platform;
 async fn main() -> Result<()> {
     init_tracing();
 
+    // Install TLS crypto provider before any kube client usage.
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("failed to install rustls crypto provider");
+
     tracing::info!("crucible-operator starting");
 
     let client = Client::try_default().await?;

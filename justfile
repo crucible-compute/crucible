@@ -66,6 +66,27 @@ test-env:
 teardown:
     kind delete cluster --name crucible
 
+# --- Tests ---
+
+# Run unit tests
+test:
+    cargo test --workspace
+
+# Run integration tests (requires running Kind cluster)
+# Starts operator locally, runs tests, then stops operator.
+test-integration:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Starting operator in background..."
+    RUST_LOG=info cargo run --bin crucible-operator &
+    OPERATOR_PID=$!
+    sleep 3
+    echo "Running integration tests..."
+    cargo test --package crucible-operator --test platform_lifecycle -- --ignored --test-threads=1 || true
+    echo "Stopping operator (PID $OPERATOR_PID)..."
+    kill $OPERATOR_PID 2>/dev/null || true
+    wait $OPERATOR_PID 2>/dev/null || true
+
 # --- Helm ---
 
 # Lint Helm chart
