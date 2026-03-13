@@ -27,6 +27,8 @@ spec:
               value: "production"
             - name: RUST_LOG
               value: "info"
+            - name: IMAGE_PULL_POLICY
+              value: {{ .Values.image.operator.pullPolicy | default "IfNotPresent" | quote }}
           ports:
             - name: health
               containerPort: 8081

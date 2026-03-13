@@ -116,11 +116,7 @@ These are append-only working documents, not polished docs. They accumulate inst
 - Health endpoint (`/healthz`) for readiness/liveness probes
 - Helm template for operator Deployment, ServiceAccount, ClusterRole
 
-### 1.2a Leader election
-- Leader election via `kube-rs` lease-based mechanism (single active replica)
-- Operator starts in standby mode until lease is acquired
-- Graceful lease handoff on shutdown (release lease before exit)
-- Integration test: run two operator replicas, verify only one is actively reconciling
+### ~~1.2a Leader election~~ → moved to M6.7
 
 ### 1.2b Dependency ordering and failure isolation
 - Dependency ordering logic: Celeborn + Volcano must be ready before platform reports ready for Spark; FlinkOperator must be ready before platform reports ready for Flink
@@ -332,6 +328,13 @@ These are append-only working documents, not polished docs. They accumulate inst
 - Run through the full Layer 2 integration test suite
 - Manual smoke test on a real EKS cluster (if available)
 - Verify: 5-minute time to first job on a running cluster
+
+### 6.7 Leader election (pre-production blocker)
+- Leader election via `kube-rs` lease-based mechanism (single active replica)
+- Operator starts in standby mode until lease is acquired
+- Graceful lease handoff on shutdown (release lease before exit)
+- Integration test: run two operator replicas, verify only one is actively reconciling
+- Moved from M1.2a — not needed for dev/test but required before production deployment
 
 ### 6.6 Cloud test infrastructure (v0.2 prep)
 - Terraform/eksctl config for dedicated test EKS cluster (2 on-demand nodes, Karpenter for executor pool)

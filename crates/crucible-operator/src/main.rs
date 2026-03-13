@@ -14,9 +14,10 @@ use kube::runtime::watcher::Config;
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 use crucible_types::platform::CruciblePlatform;
+use crucible_types::spark::CrucibleSparkJob;
 
 use crate::context::Context;
-use crate::reconcilers::platform;
+use crate::reconcilers::{platform, spark_job};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -48,22 +49,37 @@ async fn main() -> Result<()> {
         })
     };
 
-    // TODO(M1.2a): Add leader election via Lease before starting controller.
+    // TODO(M6.7): Add leader election via Lease before starting controller.
 
-    tracing::info!("starting CruciblePlatform controller");
+    tracing::info!("starting controllers");
     health_state.ready.store(true, Ordering::Relaxed);
 
-    let platforms: Api<CruciblePlatform> = Api::all(client);
+    let platforms: Api<CruciblePlatform> = Api::all(client.clone());
+    let spark_jobs: Api<CrucibleSparkJob> = Api::all(client);
 
-    Controller::new(platforms, Config::default())
-        .run(platform::reconcile, platform::error_policy, ctx)
+    let platform_ctrl = Controller::new(platforms, Config::default())
+        .run(platform::reconcile, platform::error_policy, ctx.clone())
         .for_each(|res| async move {
             match res {
-                Ok(o) => tracing::debug!(?o, "reconciled"),
-                Err(e) => tracing::error!(%e, "reconcile failed"),
+                Ok(o) => tracing::debug!(?o, "platform reconciled"),
+                Err(e) => tracing::error!(%e, "platform reconcile failed"),
             }
-        })
-        .await;
+        });
+
+    let spark_ctrl = Controller::new(spark_jobs, Config::default())
+        .run(spark_job::reconcile, spark_job::error_policy, ctx)
+        .for_each(|res| async move {
+            match res {
+                Ok(o) => tracing::debug!(?o, "spark job reconciled"),
+                Err(e) => tracing::error!(%e, "spark job reconcile failed"),
+            }
+        });
+
+    // Run both controllers concurrently. If either exits, the operator stops.
+    tokio::select! {
+        _ = platform_ctrl => tracing::warn!("platform controller exited"),
+        _ = spark_ctrl => tracing::warn!("spark job controller exited"),
+    }
 
     health_handle.abort();
     Ok(())
