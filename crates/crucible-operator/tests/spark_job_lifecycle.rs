@@ -116,27 +116,6 @@ async fn cleanup_spark_job(client: &Client, name: &str) {
     sleep(Duration::from_secs(3)).await;
 }
 
-/// Wait for a SparkJob to reach a specific phase.
-async fn wait_for_phase(
-    api: &Api<CrucibleSparkJob>,
-    name: &str,
-    target: &JobPhase,
-    timeout: Duration,
-) -> bool {
-    let start = std::time::Instant::now();
-    while start.elapsed() < timeout {
-        if let Ok(job) = api.get(name).await {
-            if let Some(phase) = job.status.as_ref().and_then(|s| s.phase.as_ref()) {
-                if phase == target || phase.is_terminal() {
-                    return phase == target;
-                }
-            }
-        }
-        sleep(Duration::from_millis(1000)).await;
-    }
-    false
-}
-
 /// Wait for any terminal phase.
 async fn wait_for_terminal(
     api: &Api<CrucibleSparkJob>,
@@ -145,12 +124,11 @@ async fn wait_for_terminal(
 ) -> Option<JobPhase> {
     let start = std::time::Instant::now();
     while start.elapsed() < timeout {
-        if let Ok(job) = api.get(name).await {
-            if let Some(phase) = job.status.as_ref().and_then(|s| s.phase.as_ref()) {
-                if phase.is_terminal() {
-                    return Some(phase.clone());
-                }
-            }
+        if let Ok(job) = api.get(name).await
+            && let Some(phase) = job.status.as_ref().and_then(|s| s.phase.as_ref())
+            && phase.is_terminal()
+        {
+            return Some(phase.clone());
         }
         sleep(Duration::from_millis(1000)).await;
     }

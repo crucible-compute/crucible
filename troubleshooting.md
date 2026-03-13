@@ -75,3 +75,19 @@ This applies to both the operator binary (`main.rs`) and integration test binari
 **Cause:** Docker Hub login expired.
 
 **Fix:** Re-run `docker login`.
+
+## Spark driver pod ImagePullBackOff in Kind
+
+**Symptom:** Driver pod stuck in `ImagePullBackOff`. Operator keeps job in `Submitted` phase.
+
+**Cause:** Pod's `imagePullPolicy` defaults to `Always`, but Kind-loaded images aren't on a registry.
+
+**Fix:** Set `IMAGE_PULL_POLICY=Never` as an env var on the operator pod. The Helm chart passes `image.operator.pullPolicy` as this env var. Ensure `test/kind-values.yaml` has `pullPolicy: Never`.
+
+## Spark driver using local[*] instead of k8s://
+
+**Symptom:** Spark jobs run single-process, no executor pods created.
+
+**Cause:** Driver was configured with `--master local[*]` instead of Spark-on-K8s mode.
+
+**Fix:** Use `--master k8s://https://kubernetes.default.svc` and ensure the driver pod has a ServiceAccount with RBAC to create/watch/delete pods and services. The operator now creates per-job SA + Role + RoleBinding automatically.

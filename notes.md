@@ -6,8 +6,11 @@
 # Run all unit tests
 cargo test --workspace
 
-# Run integration tests (requires Kind cluster)
+# Run platform integration tests (requires Kind cluster)
 cargo test --package crucible-operator --test platform_lifecycle -- --ignored --test-threads=1
+
+# Run Spark job integration tests (requires Kind cluster + platform CR)
+cargo test --package crucible-operator --test spark_job_lifecycle -- --ignored --test-threads=1
 
 # Check formatting
 cargo fmt --all --check
@@ -70,6 +73,19 @@ kubectl get deploy,sts,svc -l app.kubernetes.io/managed-by=crucible-operator
 kubectl get crd | grep crucible
 ```
 
+## Spark jobs
+
+```bash
+# Check spark job status
+kubectl get cruciblesparkjob -A
+
+# Check driver pod
+kubectl get pods -l crucible.dev/job=<job-name>
+
+# Driver pod logs
+kubectl logs <job-name>-driver
+```
+
 ## Kube-rs 3.0 specifics
 
 ```bash
@@ -77,3 +93,10 @@ kubectl get crd | grep crucible
 # In main.rs and integration tests:
 rustls::crypto::ring::default_provider().install_default()
 ```
+
+## IMAGE_PULL_POLICY
+
+The operator reads `IMAGE_PULL_POLICY` env var to set imagePullPolicy on pods it creates.
+- Kind: set to `Never` (images loaded via `kind load docker-image`)
+- Production: set to `IfNotPresent` or `Always`
+- Configured in Helm via `image.operator.pullPolicy` (flows to operator env)

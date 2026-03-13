@@ -22,6 +22,10 @@ rules:
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # RBAC management for Spark driver ServiceAccounts
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   # Leader election via leases
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]

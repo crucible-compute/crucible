@@ -2,8 +2,11 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result, anyhow};
-use k8s_openapi::api::core::v1::{Container, EnvVar, Pod, PodSpec};
+use k8s_openapi::api::core::v1::{Container, EnvVar, Pod, PodSpec, ServiceAccount};
+use k8s_openapi::api::rbac::v1::{PolicyRule, Role, RoleBinding, RoleRef, Subject};
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::OwnerReference;
 use kube::api::{Api, DeleteParams, ListParams, ObjectMeta, Patch, PatchParams};
+use kube::Resource;
 use kube::runtime::controller::Action;
 use serde_json::json;
 use tokio::time::Duration;
@@ -15,6 +18,7 @@ use crucible_types::state::JobPhase;
 use crate::context::Context;
 
 const FIELD_MANAGER: &str = "crucible-operator";
+const FINALIZER: &str = "crucible.dev/spark-job-cleanup";
 const CELEBORN_MASTER_PORT: i32 = 9097;
 const DEFAULT_SPARK_IMAGE: &str = "crucible-spark:latest";
 const DEFAULT_DRIVER_CPU: &str = "1";
@@ -34,6 +38,41 @@ pub async fn reconcile(
     tracing::info!(name, namespace, "reconciling CrucibleSparkJob");
 
     let api: Api<CrucibleSparkJob> = Api::namespaced(ctx.client.clone(), namespace);
+
+    // Handle deletion — run cleanup then remove finalizer.
+    if job.metadata.deletion_timestamp.is_some() {
+        tracing::info!(name, "CrucibleSparkJob being deleted, running cleanup");
+        if let Err(e) = handle_delete(&job, &ctx).await {
+            tracing::error!(%e, name, "cleanup failed during delete");
+        }
+        // Remove finalizer to let K8s complete the deletion.
+        let patch = json!({
+            "metadata": {
+                "finalizers": job.metadata.finalizers.as_ref()
+                    .map(|f| f.iter().filter(|fin| fin.as_str() != FINALIZER).cloned().collect::<Vec<_>>())
+                    .unwrap_or_default()
+            }
+        });
+        api.patch(name, &PatchParams::default(), &Patch::Merge(&patch)).await?;
+        return Ok(Action::await_change());
+    }
+
+    // Ensure finalizer is set.
+    if !job
+        .metadata
+        .finalizers
+        .as_ref()
+        .is_some_and(|f| f.iter().any(|fin| fin == FINALIZER))
+    {
+        let patch = json!({
+            "metadata": {
+                "finalizers": [FINALIZER]
+            }
+        });
+        api.patch(name, &PatchParams::apply(FIELD_MANAGER), &Patch::Merge(&patch)).await?;
+        // Requeue — the patched object will trigger a new reconcile.
+        return Ok(Action::requeue(Duration::from_millis(100)));
+    }
 
     let current_phase = job
         .status
@@ -99,6 +138,18 @@ pub fn error_policy(
     Action::requeue(Duration::from_secs(30))
 }
 
+/// Build an OwnerReference pointing to the given CrucibleSparkJob.
+fn owner_ref(job: &CrucibleSparkJob) -> OwnerReference {
+    OwnerReference {
+        api_version: CrucibleSparkJob::api_version(&()).to_string(),
+        kind: CrucibleSparkJob::kind(&()).to_string(),
+        name: job.metadata.name.clone().unwrap_or_default(),
+        uid: job.metadata.uid.clone().unwrap_or_default(),
+        controller: Some(true),
+        block_owner_deletion: Some(true),
+    }
+}
+
 /// Core reconciliation logic. Returns the desired status.
 async fn do_reconcile(
     job: &CrucibleSparkJob,
@@ -107,6 +158,7 @@ async fn do_reconcile(
     let name = job.metadata.name.as_deref().unwrap_or("unknown");
     let namespace = job.metadata.namespace.as_deref().unwrap_or("default");
     let spec = &job.spec;
+    let oref = owner_ref(job);
 
     let current_phase = job
         .status
@@ -130,9 +182,17 @@ async fn do_reconcile(
 
     match current_phase {
         JobPhase::Submitted => {
+            // Ensure driver ServiceAccount + RBAC exists (for Spark-on-K8s executor creation).
+            ensure_driver_rbac(ctx, namespace, name, &oref)
+                .await
+                .context("creating driver RBAC")?;
+
+            // Log Volcano PodGroup intent (actual CRD apply requires Volcano installed).
+            log_podgroup_intent(name, &spec.tenant, spec.executors.unwrap_or(DEFAULT_EXECUTORS));
+
             // Create driver pod.
             let driver_pod_name = format!("{name}-driver");
-            let spark_config = build_spark_config(spec, platform_name, namespace);
+            let spark_config = build_spark_config(spec, platform_name, namespace, name);
 
             let driver_pod = build_driver_pod(
                 name,
@@ -140,6 +200,7 @@ async fn do_reconcile(
                 &driver_pod_name,
                 spec,
                 &spark_config,
+                &oref,
             );
 
             let pod_api: Api<Pod> = Api::namespaced(ctx.client.clone(), namespace);
@@ -204,36 +265,36 @@ async fn do_reconcile(
     }
 
     // Transition Submitted → Running if driver pod is running.
-    if status.phase == Some(JobPhase::Submitted) {
-        if let Some(ref driver_pod_name) = status.driver_pod {
-            let pod_api: Api<Pod> = Api::namespaced(ctx.client.clone(), namespace);
-            if let Ok(pod) = pod_api.get(driver_pod_name).await {
-                let pod_phase = pod
-                    .status
-                    .as_ref()
-                    .and_then(|s| s.phase.as_deref())
-                    .unwrap_or("Pending");
+    if status.phase == Some(JobPhase::Submitted)
+        && let Some(ref driver_pod_name) = status.driver_pod
+    {
+        let pod_api: Api<Pod> = Api::namespaced(ctx.client.clone(), namespace);
+        if let Ok(pod) = pod_api.get(driver_pod_name).await {
+            let pod_phase = pod
+                .status
+                .as_ref()
+                .and_then(|s| s.phase.as_deref())
+                .unwrap_or("Pending");
 
-                match pod_phase {
-                    "Running" => {
-                        status.phase = Some(JobPhase::Running);
-                        status.ui_url = Some(format!(
-                            "http://{driver_pod_name}.{namespace}:4040"
-                        ));
-                    }
-                    "Succeeded" => {
-                        status.phase = Some(JobPhase::Completed);
-                        status.end_time = Some(chrono::Utc::now().to_rfc3339());
-                    }
-                    "Failed" => {
-                        let message = extract_pod_error(&pod);
-                        let enriched = enrich_error(ctx, namespace, platform_name, &message).await;
-                        status.phase = Some(JobPhase::Failed);
-                        status.error = Some(enriched);
-                        status.end_time = Some(chrono::Utc::now().to_rfc3339());
-                    }
-                    _ => {} // Still pending.
+            match pod_phase {
+                "Running" => {
+                    status.phase = Some(JobPhase::Running);
+                    status.ui_url = Some(format!(
+                        "http://{driver_pod_name}.{namespace}:4040"
+                    ));
                 }
+                "Succeeded" => {
+                    status.phase = Some(JobPhase::Completed);
+                    status.end_time = Some(chrono::Utc::now().to_rfc3339());
+                }
+                "Failed" => {
+                    let message = extract_pod_error(&pod);
+                    let enriched = enrich_error(ctx, namespace, platform_name, &message).await;
+                    status.phase = Some(JobPhase::Failed);
+                    status.error = Some(enriched);
+                    status.end_time = Some(chrono::Utc::now().to_rfc3339());
+                }
+                _ => {} // Still pending.
             }
         }
     }
@@ -262,6 +323,7 @@ pub fn build_spark_config(
     spec: &crucible_types::spark::CrucibleSparkJobSpec,
     platform_name: &str,
     namespace: &str,
+    job_name: &str,
 ) -> BTreeMap<String, String> {
     let celeborn_endpoint = format!(
         "{platform_name}-celeborn-master.{namespace}.svc:{CELEBORN_MASTER_PORT}"
@@ -288,6 +350,22 @@ pub fn build_spark_config(
     config.insert(
         "spark.eventLog.dir".to_string(),
         "s3a://crucible-data/spark-events".to_string(),
+    );
+
+    // Spark-on-K8s executor container image and service account.
+    let image_pull_policy = std::env::var("IMAGE_PULL_POLICY")
+        .unwrap_or_else(|_| "IfNotPresent".to_string());
+    config.insert(
+        "spark.kubernetes.container.image".to_string(),
+        DEFAULT_SPARK_IMAGE.to_string(),
+    );
+    config.insert(
+        "spark.kubernetes.container.image.pullPolicy".to_string(),
+        image_pull_policy,
+    );
+    config.insert(
+        "spark.kubernetes.authenticate.driver.serviceAccountName".to_string(),
+        driver_sa_name(job_name),
     );
 
     // Decommissioning config for graceful executor shutdown.
@@ -319,6 +397,7 @@ fn build_driver_pod(
     driver_pod_name: &str,
     spec: &crucible_types::spark::CrucibleSparkJobSpec,
     spark_config: &BTreeMap<String, String>,
+    owner_ref: &OwnerReference,
 ) -> Pod {
     let labels = job_labels(job_name, "driver");
 
@@ -333,11 +412,13 @@ fn build_driver_pod(
         .and_then(|r| r.memory.as_deref())
         .unwrap_or(DEFAULT_DRIVER_MEMORY);
 
-    // Build spark-submit arguments.
+    let sa_name = driver_sa_name(job_name);
+
+    // Build spark-submit arguments — Spark-on-K8s mode.
     let mut spark_args = vec![
         "/opt/spark/bin/spark-submit".to_string(),
         "--master".to_string(),
-        "local[*]".to_string(), // Driver runs spark-submit; executors managed by K8s
+        "k8s://https://kubernetes.default.svc".to_string(),
         "--deploy-mode".to_string(),
         "client".to_string(),
         "--class".to_string(),
@@ -396,7 +477,6 @@ fn build_driver_pod(
         ..Default::default()
     }];
 
-    // Use IfNotPresent so Kind-loaded images work without pulling from registry.
     let image_pull_policy = std::env::var("IMAGE_PULL_POLICY")
         .unwrap_or_else(|_| "IfNotPresent".to_string());
 
@@ -417,9 +497,11 @@ fn build_driver_pod(
             name: Some(driver_pod_name.to_string()),
             namespace: Some(namespace.to_string()),
             labels: Some(labels),
+            owner_references: Some(vec![owner_ref.clone()]),
             ..Default::default()
         },
         spec: Some(PodSpec {
+            service_account_name: Some(sa_name),
             restart_policy: Some("Never".to_string()),
             containers: vec![Container {
                 name: "spark-driver".to_string(),
@@ -451,6 +533,107 @@ pub fn job_labels(job_name: &str, role: &str) -> BTreeMap<String, String> {
         ("crucible.dev/job".to_string(), job_name.to_string()),
         ("crucible.dev/role".to_string(), role.to_string()),
     ])
+}
+
+/// ServiceAccount name for the Spark driver pod.
+fn driver_sa_name(job_name: &str) -> String {
+    format!("{job_name}-driver")
+}
+
+/// Ensure the driver ServiceAccount, Role, and RoleBinding exist so the driver
+/// can create/watch/delete executor pods via Spark-on-K8s.
+async fn ensure_driver_rbac(ctx: &Context, namespace: &str, job_name: &str, owner_ref: &OwnerReference) -> Result<()> {
+    let sa_name = driver_sa_name(job_name);
+    let role_name = format!("{job_name}-spark-role");
+    let binding_name = format!("{job_name}-spark-binding");
+
+    let labels = job_labels(job_name, "driver-rbac");
+
+    // ServiceAccount
+    let sa = ServiceAccount {
+        metadata: ObjectMeta {
+            name: Some(sa_name.clone()),
+            namespace: Some(namespace.to_string()),
+            labels: Some(labels.clone()),
+            owner_references: Some(vec![owner_ref.clone()]),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let sa_api: Api<ServiceAccount> = Api::namespaced(ctx.client.clone(), namespace);
+    sa_api
+        .patch(&sa_name, &PatchParams::apply(FIELD_MANAGER), &Patch::Apply(sa))
+        .await
+        .context("creating driver ServiceAccount")?;
+
+    // Role — driver needs to manage executor pods and services.
+    let role = Role {
+        metadata: ObjectMeta {
+            name: Some(role_name.clone()),
+            namespace: Some(namespace.to_string()),
+            labels: Some(labels.clone()),
+            owner_references: Some(vec![owner_ref.clone()]),
+            ..Default::default()
+        },
+        rules: Some(vec![
+            PolicyRule {
+                api_groups: Some(vec!["".to_string()]),
+                resources: Some(vec![
+                    "pods".to_string(),
+                    "services".to_string(),
+                    "configmaps".to_string(),
+                ]),
+                verbs: vec![
+                    "get".to_string(),
+                    "list".to_string(),
+                    "watch".to_string(),
+                    "create".to_string(),
+                    "update".to_string(),
+                    "patch".to_string(),
+                    "delete".to_string(),
+                ],
+                ..Default::default()
+            },
+        ]),
+    };
+    let role_api: Api<Role> = Api::namespaced(ctx.client.clone(), namespace);
+    role_api
+        .patch(&role_name, &PatchParams::apply(FIELD_MANAGER), &Patch::Apply(role))
+        .await
+        .context("creating driver Role")?;
+
+    // RoleBinding
+    let binding = RoleBinding {
+        metadata: ObjectMeta {
+            name: Some(binding_name.clone()),
+            namespace: Some(namespace.to_string()),
+            labels: Some(labels),
+            owner_references: Some(vec![owner_ref.clone()]),
+            ..Default::default()
+        },
+        role_ref: RoleRef {
+            api_group: "rbac.authorization.k8s.io".to_string(),
+            kind: "Role".to_string(),
+            name: role_name,
+        },
+        subjects: Some(vec![Subject {
+            kind: "ServiceAccount".to_string(),
+            name: sa_name,
+            namespace: Some(namespace.to_string()),
+            ..Default::default()
+        }]),
+    };
+    let binding_api: Api<RoleBinding> = Api::namespaced(ctx.client.clone(), namespace);
+    binding_api
+        .patch(
+            &binding_name,
+            &PatchParams::apply(FIELD_MANAGER),
+            &Patch::Apply(binding),
+        )
+        .await
+        .context("creating driver RoleBinding")?;
+
+    Ok(())
 }
 
 /// List executor pods for a job by label selector.
@@ -533,6 +716,20 @@ async fn enrich_error(
     enriched
 }
 
+/// Log the intent to create a Volcano PodGroup for gang scheduling.
+/// Actual PodGroup CRD creation requires Volcano to be installed; this logs the
+/// spec so we can verify correctness before wiring up the real apply.
+fn log_podgroup_intent(job_name: &str, tenant: &str, num_executors: u32) {
+    let queue = tenant; // Volcano queue maps 1:1 to tenant name.
+    let min_member = num_executors + 1; // executors + driver
+    tracing::info!(
+        job_name,
+        queue,
+        min_member,
+        "would create Volcano PodGroup for gang scheduling"
+    );
+}
+
 /// Handle deletion of a CrucibleSparkJob: kill driver and executor pods.
 pub async fn handle_delete(
     job: &CrucibleSparkJob,
@@ -561,6 +758,17 @@ mod tests {
     use super::*;
     use crucible_types::spark::{CrucibleSparkJobSpec, ResourceSpec};
 
+    fn test_owner_ref() -> OwnerReference {
+        OwnerReference {
+            api_version: "crucible.dev/v1".to_string(),
+            kind: "CrucibleSparkJob".to_string(),
+            name: "test-job".to_string(),
+            uid: "test-uid-1234".to_string(),
+            controller: Some(true),
+            block_owner_deletion: Some(true),
+        }
+    }
+
     fn sample_spec() -> CrucibleSparkJobSpec {
         CrucibleSparkJobSpec {
             jar: "s3://bucket/app.jar".to_string(),
@@ -587,7 +795,7 @@ mod tests {
     #[test]
     fn spark_config_includes_celeborn_settings() {
         let spec = sample_spec();
-        let config = build_spark_config(&spec, "my-platform", "default");
+        let config = build_spark_config(&spec, "my-platform", "default", "test-job");
 
         assert_eq!(
             config.get("spark.shuffle.manager").unwrap(),
@@ -602,7 +810,7 @@ mod tests {
     #[test]
     fn spark_config_includes_event_log() {
         let spec = sample_spec();
-        let config = build_spark_config(&spec, "platform", "ns");
+        let config = build_spark_config(&spec, "platform", "ns", "test-job");
 
         assert_eq!(config.get("spark.eventLog.enabled").unwrap(), "true");
         assert!(config.get("spark.eventLog.dir").unwrap().contains("spark-events"));
@@ -611,7 +819,7 @@ mod tests {
     #[test]
     fn spark_config_includes_decommissioning() {
         let spec = sample_spec();
-        let config = build_spark_config(&spec, "p", "ns");
+        let config = build_spark_config(&spec, "p", "ns", "test-job");
 
         assert_eq!(config.get("spark.decommission.enabled").unwrap(), "true");
     }
@@ -623,7 +831,7 @@ mod tests {
             "spark.eventLog.enabled".to_string(),
             "false".to_string(),
         );
-        let config = build_spark_config(&spec, "p", "ns");
+        let config = build_spark_config(&spec, "p", "ns", "test-job");
 
         assert_eq!(config.get("spark.eventLog.enabled").unwrap(), "false");
     }
@@ -642,8 +850,8 @@ mod tests {
     #[test]
     fn driver_pod_spec_contains_jar_and_class() {
         let spec = sample_spec();
-        let config = build_spark_config(&spec, "p", "ns");
-        let pod = build_driver_pod("job1", "default", "job1-driver", &spec, &config);
+        let config = build_spark_config(&spec, "p", "ns", "test-job");
+        let pod = build_driver_pod("job1", "default", "job1-driver", &spec, &config, &test_owner_ref());
 
         let container = &pod.spec.as_ref().unwrap().containers[0];
         let args_str = container.args.as_ref().unwrap().join(" ");
@@ -655,8 +863,8 @@ mod tests {
     #[test]
     fn driver_pod_has_executor_config() {
         let spec = sample_spec();
-        let config = build_spark_config(&spec, "p", "ns");
-        let pod = build_driver_pod("job1", "default", "job1-driver", &spec, &config);
+        let config = build_spark_config(&spec, "p", "ns", "test-job");
+        let pod = build_driver_pod("job1", "default", "job1-driver", &spec, &config, &test_owner_ref());
 
         let args_str = pod.spec.as_ref().unwrap().containers[0]
             .args
@@ -671,8 +879,8 @@ mod tests {
     #[test]
     fn driver_pod_has_resource_requests() {
         let spec = sample_spec();
-        let config = build_spark_config(&spec, "p", "ns");
-        let pod = build_driver_pod("job1", "default", "job1-driver", &spec, &config);
+        let config = build_spark_config(&spec, "p", "ns", "test-job");
+        let pod = build_driver_pod("job1", "default", "job1-driver", &spec, &config, &test_owner_ref());
 
         let resources = pod.spec.as_ref().unwrap().containers[0]
             .resources
@@ -690,8 +898,8 @@ mod tests {
         spec.executor_resources = None;
         spec.executors = None;
 
-        let config = build_spark_config(&spec, "p", "ns");
-        let pod = build_driver_pod("job1", "default", "job1-driver", &spec, &config);
+        let config = build_spark_config(&spec, "p", "ns", "test-job");
+        let pod = build_driver_pod("job1", "default", "job1-driver", &spec, &config, &test_owner_ref());
 
         let resources = pod.spec.as_ref().unwrap().containers[0]
             .resources
@@ -712,8 +920,8 @@ mod tests {
     #[test]
     fn driver_pod_restart_policy_is_never() {
         let spec = sample_spec();
-        let config = build_spark_config(&spec, "p", "ns");
-        let pod = build_driver_pod("job1", "default", "job1-driver", &spec, &config);
+        let config = build_spark_config(&spec, "p", "ns", "test-job");
+        let pod = build_driver_pod("job1", "default", "job1-driver", &spec, &config, &test_owner_ref());
 
         assert_eq!(
             pod.spec.as_ref().unwrap().restart_policy.as_deref(),
