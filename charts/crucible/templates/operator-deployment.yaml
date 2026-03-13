@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "crucible.fullname" . }}-operator
+  namespace: {{ include "crucible.namespace" . }}
+  labels:
+    {{- include "crucible.labels" . | nindent 4 }}
+    {{- include "crucible.operator.selectorLabels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.operator.replicas }}
+  selector:
+    matchLabels:
+      {{- include "crucible.operator.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "crucible.labels" . | nindent 8 }}
+        {{- include "crucible.operator.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "crucible.serviceAccountName" . }}
+      containers:
+        - name: operator
+          image: "{{ .Values.image.operator.repository }}:{{ .Values.image.operator.tag }}"
+          imagePullPolicy: {{ .Values.image.operator.pullPolicy }}
+          env:
+            - name: CRUCIBLE_ENV
+              value: "production"
+            - name: RUST_LOG
+              value: "info"
+          ports:
+            - name: health
+              containerPort: 8081
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.operator.resources | nindent 12 }}

@@ -1,0 +1,79 @@
+## Crucible Helm values
+
+## Container image settings
+image:
+  operator:
+    repository: ghcr.io/crucible-compute/crucible-operator
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  api:
+    repository: ghcr.io/crucible-compute/crucible-api
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+
+## Namespace to deploy into (defaults to release namespace)
+namespace: ""
+
+## Operator settings
+operator:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+## API server settings
+api:
+  replicas: 1
+  port: 8080
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+## Managed dependency versions
+versions:
+  celeborn: "0.5.2"
+  volcano: "1.10.0"
+  flinkOperator: "1.10.0"
+
+## Celeborn settings
+celeborn:
+  workers: 3
+  workerStorage: emptyDir
+  image: apache/celeborn:0.5.2
+
+## History Server settings
+historyServer:
+  enabled: true
+  image: apache/spark:4.0.0
+  resources:
+    requests:
+      cpu: 100m
+      memory: 1Gi
+    limits:
+      cpu: 500m
+      memory: 2Gi
+
+## Object store settings
+objectStore:
+  bucket: crucible-data
+  endpoint: ""
+  region: us-east-1
+
+## Metrics
+metrics:
+  enabled: false
+  port: 9090
+
+## Service account
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
