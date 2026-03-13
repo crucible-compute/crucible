@@ -14,6 +14,8 @@ These are append-only working documents, not polished docs. They accumulate inst
 
 **Git push:** At the end of every milestone, commit all work and push to the remote. Each milestone should land as one or more commits on `main` before starting the next.
 
+**Tool and credential prerequisites:** When a required tool is missing (e.g. `just`, `helm`, `kind`) or credentials are expired (e.g. `docker login`, `aws` CLI, `gcloud`), ask the user to install or re-authenticate rather than circumventing or running underlying commands directly.
+
 ---
 
 ## Decisions
